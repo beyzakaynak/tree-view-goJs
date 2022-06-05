@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+</head>
+<body>
+<script src="https://unpkg.com/gojs@2.2.10/release/go.js"></script>
+
+<div id="allSampleContent" class="p-4 w-full">
+    <style type="text/css">
+
+        .menu {
+            display: none;
+            position: absolute;
+            opacity: 0;
+            margin: 0;
+            padding: 8px 0;
+            z-index: 999;
+            box-shadow: 0 5px 5px -3px rgba(0, 0, 0, .2), 0 8px 10px 1px rgba(0, 0, 0, .14), 0 3px 14px 2px rgba(0, 0, 0, .12);
+            list-style: none;
+            background-color: #ffffff;
+            border-radius: 4px;
+        }
+
+        .menu-item {
+            display: block;
+            position: relative;
+            min-width: 60px;
+            margin: 0;
+            padding: 6px 16px;
+            font: bold 12px sans-serif;
+            color: rgba(0, 0, 0, .87);
+            cursor: pointer;
+        }
+
+        .menu-item::before {
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            pointer-events: none;
+            content: "";
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+        }
+
+        .menu-item:hover::before {
+            opacity: .04;
+        }
+
+        .menu .menu {
+            top: -8px;
+            left: 100%;
+        }
+
+        .show-menu, .menu-item:hover > .menu {
+            display: block;
+            opacity: 1;
+        }
+    </style>
+    <script id="code">
+
+        go.Shape.defineFigureGenerator("ExpandedLine", (shape, w, h) => {
+            return new go.Geometry()
+                .add(new go.PathFigure(0, 0.25 * h, false)
+                    .add(new go.PathSegment(go.PathSegment.Line, .5 * w, 0.75 * h))
+                    .add(new go.PathSegment(go.PathSegment.Line, w, 0.25 * h)));
+        });
+
+        go.Shape.defineFigureGenerator("CollapsedLine", (shape, w, h) => {
+            return new go.Geometry()
+                .add(new go.PathFigure(0.25 * w, 0, false)
+                    .add(new go.PathSegment(go.PathSegment.Line, 0.75 * w, .5 * h))
+                    .add(new go.PathSegment(go.PathSegment.Line, 0.25 * w, h)));
+        });
+
+        var myDiagram = null;
+
+        async function init() {
+            const $ = go.GraphObject.make;
+
+            myDiagram =
+                $(go.Diagram, "myDiagramDiv", {
+                    allowMove: false,
+                    allowCopy: false,
+                    allowDelete: false,
+                    allowHorizontalScroll: false,
+                    layout: $(go.TreeLayout, {
+                        alignment: go.TreeLayout.AlignmentStart,
+                        angle: 0,
+                        compaction: go.TreeLayout.CompactionNone,
+                        layerSpacing: 16,
+                        layerSpacingParentOverlap: 1,
+                        nodeIndentPastParent: 1.0,
+                        nodeSpacing: 0,
+                        setsPortSpot: false,
+                        setsChildPortSpot: false
+                    })
+                });
+
+            var cxElement = document.getElementById("contextMenu");
+
+            var myContextMenu = $(go.HTMLInfo, {
+                show: showContextMenu,
+                hide: hideContextMenu
+            });
+
+            myDiagram.nodeTemplate =
+                $(go.Node, {
+                        selectionAdorned: false,
+                        doubleClick: (e, node) => {
+                            var cmd = myDiagram.commandHandler;
+                            if (node.isTreeExpanded) {
+                                if (!cmd.canCollapseTree(node)) return;
+                            } else {
+                                if (!cmd.canExpandTree(node)) return;
+                            }
+                            e.handled = true;
+                            if (node.isTreeExpanded) {
+                                cmd.collapseTree(node);
+                            } else {
+                                cmd.expandTree(node);
+                            }
+                        }
+                    },
+                    {contextMenu: myContextMenu},
+                    $("TreeExpanderButton", { 
+                        "_treeExpandedFigure": "ExpandedLine",
+                        "_treeCollapsedFigure": "CollapsedLine",
+                        "ButtonBorder.fill": "whitesmoke",
+                        "ButtonBorder.stroke": null,
+                        "_buttonFillOver": "rgba(0,128,255,0.25)",
+                        "_buttonStrokeOver": null
+                    }),
+                    $(go.Panel, "Horizontal", {
+                            position: new go.Point(18, 0)
+                        },
+                        new go.Binding("background", "isSelected", s => s ? "lightblue" : "white").ofObject(),
+                        $(go.TextBlock, {
+                                font: '9pt Verdana, sans-serif'
+                            },
+                            new go.Binding("text", "name"))
+                    )
+                );
+
+            myDiagram.linkTemplate = $(go.Link);
+
+            var nodeDataArray = [];
+            var count = 0;
+
+            let data = await fetch("http://localhost:3000/turkiye")
+                .then(response => response.json())
+                .then(res => {
+                    return res.data;
+                });
+
+            data.forEach(city => {
+                let cityCount = count++
+
+                const newCity = {
+                    ...city,
+                    name: city.il_adi,
+                    key: cityCount
+                }
+
+                nodeDataArray.push(newCity)
+
+                city.ilceler.forEach(district => {
+                    const newDistrict = {
+                        ...district,
+                        name: district.ilce_adi,
+                        key: count++,
+                        parent: cityCount
+                    }
+                    nodeDataArray.push(newDistrict);
+                })
+            })
+
+            myDiagram.model = new go.TreeModel(nodeDataArray);
+
+            myDiagram.contextMenu = myContextMenu;
+
+            cxElement.addEventListener("contextmenu", e => {
+                e.preventDefault();
+                return false;
+            }, false);
+
+            function showContextMenu(obj, diagram, tool) {
+                document.getElementById("nufus").style.display = "block";
+                document.getElementById("yuzolcumu").style.display = "block";
+
+                diagram.selection.each(node => {
+                    if (node instanceof go.Node) {
+                        var data = node.data;
+
+                        document.getElementById("nufus").innerHTML = "Nüfus : " + data.nufus;
+                        document.getElementById("yuzolcumu").innerHTML = "Yüz Ölçümü : " + data.yuzolcumu;
+                    }
+                });
+
+                cxElement.classList.add("show-menu");
+                var mousePt = diagram.lastInput.viewPoint;
+                cxElement.style.left = mousePt.x + 5 + "px";
+                cxElement.style.top = mousePt.y + "px";
+            }
+
+            function hideContextMenu() {
+                cxElement.classList.remove("show-menu");
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+
+    <div id="sample">
+        <div style="display: inline-block;">
+            <div style="position: relative;">
+                <div id="myDiagramDiv"
+                     style="border: 1px solid black; width: 800px; height: 800px; position: relative; -webkit-tap-highlight-color: rgba(255, 255, 255, 0);">
+                    <canvas tabindex="0" width="398" height="398"
+                            style="position: absolute; top: 0px; left: 0px; z-index: 2; user-select: none; touch-action: none; width: 398px; height: 398px;">
+                        This text is displayed if your browser does not support the Canvas HTML element.
+                    </canvas>
+                    <div style="position: absolute; overflow: auto; width: 398px; height: 398px; z-index: 1;">
+                        <div style="position: absolute; width: 1px; height: 1px;"></div>
+                    </div>
+                </div>
+                <div id="contextMenu" class="menu">
+                    <div id="nufus" class="menu-item"></div>
+                    <div id="yuzolcumu" class="menu-item"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
